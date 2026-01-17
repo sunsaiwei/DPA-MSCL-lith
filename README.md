@@ -22,7 +22,7 @@ Because the Daqing Oilfield dataset is part of an ongoing project and has not ye
 
 
 ## The operating environment of the project
--	Python == 3.11.4
+-	Python == 3.9.21
 - conda == 24.9.2
 -	pandas == 2.0.3
 -	numpy == 1.23.5
