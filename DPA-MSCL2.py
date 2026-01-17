@@ -1,0 +1,234 @@
+import torch
+import random
+import torch.nn as nn
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+import argparse
+import pandas as pd
+import time
+
+import torch.optim as optim
+from torch.utils.tensorboard import SummaryWriter
+
+
+from sklearn.metrics import precision_score, recall_score, f1_score, confusion_matrix
+
+from utils.load_data import get_blind_HP_MultiViewData
+from utils.utils import get_cls_num_list, write_file, get_confusion_matrix, save_metrics_plot, warmup_lr_scheduler
+from model.model import BCLModel,Classifier
+from losses.BCLLoss import BalSCL
+from losses.logitadjustLoss import LogitAdjust
+from train.DPA_BCL_train import BCL_train, train_model, evaluate, save_predictions
+
+def parse_arguments():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--dataset', type=str, default="blind_HP",
+                        help='Dataset to use: Hugoton_Panoma or blind_HP or daqing or blind_daqing.')
+    parser.add_argument('--print_freq', type=int, default=10,
+                        help='print frequency')
+    parser.add_argument('--no-cuda', action='store_true', default=False,
+                        help='Disables CUDA training.')
+    parser.add_argument('--seed', type=int, default=3028,
+                        help='Random seed.')
+    parser.add_argument('--random_state', type=int, default=42,
+                        help='random_state for Dataset split.')
+    parser.add_argument('--epochs1', type=int, default=7,
+                        help='Number of epochs to Contrastive train.')
+    parser.add_argument('--epochs2', type=int, default=80,
+                        help='Number of epochs to Classification train.')
+    parser.add_argument('--lr', type=float, default=0.0001491,
+                        help='Initial learning rate.')
+    parser.add_argument('--gamma', type=float, default=0.1,
+                        help='LR scheduler gamma.')
+    parser.add_argument('--step-size', type=int, default=20,
+                        help='LR scheduler step size.')
+    parser.add_argument('--temp', type=float, default=0.07,
+                        help='temperature for loss function')
+    parser.add_argument('--data_path1', type=str, default="dataset/hp.xlsx",
+                        help='Hugoton_Panoma_path.')
+    parser.add_argument('--data_path2', type=str, default="dataset/example_daqing.xlsx",
+                        help='part_Daqing_path.')
+    parser.add_argument('--data_path3', type=str, default="dataset/example_daqing_train_data.xlsx",
+                        help='daqing_train_data.')
+    parser.add_argument('--data_path4', type=str, default="dataset/example_daqing_blind_data.xlsx",
+                        help='daqing_blind_data.')
+    parser.add_argument('--dropout', type=float, default=0.6,
+                        help='Dropout rate (1 - keep probability).')
+    parser.add_argument('--batch_size', type=int, default=32,
+                        help='Batch size for training.')
+    parser.add_argument('--test_size', type=float, default=0.2,
+                        help='Test size for Dataset split.')
+    parser.add_argument('--warm_epochs', type=int, default=5,
+                        help='Number of warm-up epochs')
+    parser.add_argument('--warmup_from', type=float, default=0.0001,
+                        help='Initial learning rate for warm-up')
+    parser.add_argument('--warmup_to', type=float, default=0.0111,
+                        help='Final learning rate after warm-up')
+
+    parser.add_argument('--alpha', default=1.0, type=float,
+                        help='cross entropy loss weight')
+    parser.add_argument('--beta', default=0.265, type=float,
+                        help='supervised contrastive loss weight')
+    parser.add_argument('--features1', type=int, default=7,
+                        help='feature number for hp.')
+    parser.add_argument('--features2', type=int, default=13,
+                        help='feature number for daqing.')
+    parser.add_argument('--num_classes1', type=int, default=9,
+                        help='Number of classes or categories in the  hp dataset')
+    parser.add_argument('--num_classes2', type=int, default=6,
+                        help='Number of classes or categories in the  daqing dataset')
+    parser.add_argument('--blind_well1', type=str, default="SHANKLE",
+                        help='Well name for blind1 well 1.')
+    parser.add_argument('--blind_well2', type=str, default="STUART",
+                        help='Well name for blind1 well 2.')
+    args = parser.parse_args()
+    args.cuda = not args.no_cuda and torch.cuda.is_available()
+    return args
+
+args = parse_arguments()
+
+def main():
+    seed = args.seed
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    np.random.seed(seed)
+    random.seed(seed)
+
+    if args.dataset == "blind_HP":
+        x_train, x_test, data_train_loader, y_train, y_test, test_loader = (
+            get_blind_HP_MultiViewData(args.data_path1, args.blind_well1, args.blind_well2, args))
+        args.features = args.features1
+        args.num_classes = args.num_classes1
+        cls_num_list = get_cls_num_list(y_train, args.num_classes)
+        dropout = args.dropout
+        save_path = 'datasave/blind_HP/'
+    else:
+        raise ValueError("Invalid dataset name")
+
+    train_loader = data_train_loader
+    supcon_model = BCLModel(args.features, args.num_classes, dropout=dropout)
+    device = torch.device("cuda:0" if args.cuda else "cpu")
+    supcon_model.to(device)
+    optimizer = optim.Adam(supcon_model.parameters(), lr=args.warmup_from)
+    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=args.step_size, gamma=args.gamma)
+    criterion_scl = BalSCL(cls_num_list, args.temp).to(device)
+    criterion_ce = LogitAdjust(cls_num_list).to(device)
+
+    tb_path = save_path + 'tensorboard/DPA_BCL(W2=1,3,W3=5,7)'
+    writer = SummaryWriter(log_dir=tb_path)
+
+    for epoch in range(1, args.epochs1 + 1):
+        optimizer = warmup_lr_scheduler(args, optimizer, epoch)
+        # train for one epoch
+        time1 = time.time()
+        loss = BCL_train(train_loader, supcon_model, criterion_ce, criterion_scl, optimizer, args, epoch)
+        time2 = time.time()
+        writer.add_scalar('LR', optimizer.param_groups[0]['lr'], epoch)
+        writer.add_scalar('Loss/train', loss, epoch)
+        print('epoch {}, total time {:.2f}'.format(epoch, time2 - time1))
+    writer.close()
+
+    train_accs = []
+    test_accs = []
+
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    classifier_model = Classifier(args.num_classes, dropout=0)
+    optimizer = optim.Adam(classifier_model.parameters(), lr=args.lr)
+    criterion = nn.CrossEntropyLoss()
+    best_accuracy = 0
+    best_model_path = save_path + f'{args.dataset}_best.pth'
+    device = torch.device("cuda:0" if args.cuda else "cpu")
+    classifier_model.to(device)
+
+    for epoch in range(1, args.epochs2 + 1):
+        train_model(supcon_model.encoder2, supcon_model.encoder3, classifier_model, criterion, optimizer,
+                    data_train_loader,
+                    device=device)
+        train_accuracy, _ = evaluate(supcon_model.encoder2, supcon_model.encoder3, classifier_model, x_train,
+                                     y_train,
+                                     device=device)
+        test_accuracy, predicted_test = evaluate(supcon_model.encoder2, supcon_model.encoder3, classifier_model,
+                                                 x_test,
+                                                 y_test,
+                                                 device=device)
+        train_accs.append(train_accuracy)
+        test_accs.append(test_accuracy)
+        print(
+            f'Epoch: {epoch}/{args.epochs2}, Train Accuracy: {train_accuracy:.4f}, Test Accuracy: {test_accuracy:.4f}')
+
+        if test_accuracy > best_accuracy:
+            best_accuracy = test_accuracy
+            torch.save(classifier_model.state_dict(), best_model_path)
+
+        scheduler.step()
+
+    classifier_model.load_state_dict(torch.load(best_model_path))
+    accuracy, predicted = evaluate(supcon_model.encoder2, supcon_model.encoder3, classifier_model, x_test, y_test,
+                                   device=device)
+    path = save_path + 'y_pre/DPA_BCL(W2=1,3,W3=5,7).txt'
+    write_file(path, predicted)
+
+    precision = precision_score(y_test.cpu(), predicted.cpu(), average='macro')
+    recall = recall_score(y_test.cpu(), predicted.cpu(), average='macro')
+    f1 = f1_score(y_test.cpu(), predicted.cpu(), average='macro')
+    conf_matrix = get_confusion_matrix(y_test.cpu(), predicted.cpu())
+
+    eval_save_path = save_path + f'model_evaluation/'
+    save_metrics_plot(args, accuracy, precision, recall, f1, eval_save_path, "DPA_BCL(W2=1,3,W3=5,7)")
+
+    lithology_labels = ['SS', 'CSiS', 'FSiS', 'SiSh', 'MS', 'WS', 'D', 'PS', 'BS']
+
+    row_sum = conf_matrix.sum(axis=1, keepdims=True)
+    conf_matrix_normalized = np.divide(
+        conf_matrix.astype(float), row_sum,
+        out=np.zeros_like(conf_matrix, dtype=float),
+        where=row_sum != 0
+    ) * 100
+
+    plt.rcParams['font.family'] = 'Times New Roman'
+
+    cmap = sns.light_palette("#f28e2b", as_cmap=True)
+
+    plt.figure(figsize=(10, 7))
+    ax = sns.heatmap(
+        conf_matrix_normalized,
+        annot=True,
+        fmt=".2f",
+        cmap=cmap,
+        vmin=0, vmax=100,
+        square=True,
+        xticklabels=lithology_labels,
+        yticklabels=lithology_labels,
+        linewidths=0, 
+        annot_kws={"size": 14, "color": "black"},
+        cbar_kws={"ticks": [0, 20, 40, 60, 80, 100], "pad": 0.02, "shrink": 1.0}
+    )
+
+    ax.set_title("DPA-MSCL", fontsize=18, pad=10)
+
+    ax.set_xlabel("Predicted lithology", fontsize=16, labelpad=10)
+    ax.set_ylabel("True lithology", fontsize=16, labelpad=10)
+
+    ax.set_xticklabels(ax.get_xticklabels(), rotation=0)
+    ax.set_yticklabels(ax.get_yticklabels(), rotation=90, va="center")
+    ax.tick_params(axis='both', labelsize=14)
+
+    for spine in ax.spines.values():
+        spine.set_visible(True)
+        spine.set_linewidth(1)
+
+    ax.collections[0].colorbar.ax.tick_params(labelsize=12)
+
+    plt.tight_layout()
+
+    confusion_matrix_save_path = save_path + f'confusion_matrix/'
+    plt.savefig(confusion_matrix_save_path + f'DPA_BCL(W2=1,3,W3=5,7).png', dpi=600, bbox_inches="tight", pad_inches=0)
+    plt.show()
+
+
+if __name__ == '__main__':
+    main()
