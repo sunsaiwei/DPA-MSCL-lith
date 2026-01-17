@@ -32,5 +32,4 @@ Because the Daqing Oilfield dataset is part of an ongoing project and has not ye
 - pickleshare == 0.7.5
 
 ## How to use this project？
-The root directory contains scripts for the experiments of the model on various datasets.
-
+The root directory contains scripts for lithology identification and cross-well lithology identification experiments on two datasets. Specifically, Experiments 1–4 correspond to: (1) lithology identification on the U.S. Hugoton–Panoma dataset, (2) cross-well lithology identification on the Hugoton–Panoma dataset, (3) lithology identification on the Daqing dataset, and (4) cross-well lithology identification on the Daqing dataset.
