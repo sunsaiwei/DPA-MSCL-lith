@@ -4,14 +4,14 @@ Because the Daqing Oilfield dataset is part of an ongoing project and has not ye
 - - **Lithologic visualization**
 
 <div align="center">
-  <img src="datasave/img/profile_W_A.png" width="500" />
-  <img src="datasave/img/profile_W_B.png" width="500" />
+  <img src="datasave/img/profile_W_A.png" width="450" />
+  <img src="datasave/img/profile_W_B.png" width="450" />
 </div>
 
 - - **Comparison of Confusion Matrices**
 <div align="center">
-  <img src="datasave/img/Confusion_SGAN.png" width="500" />
-  <img src="datasave/img/Confusion_DPA.png" width="500" />
+  <img src="datasave/img/Confusion_SGAN.png" width="450" />
+  <img src="datasave/img/Confusion_DPA.png" width="450" />
 </div>
 
 - - **3D t-SNE visualization of the feature space on the Hugoton-Panoma dataset before and after representation learning**
