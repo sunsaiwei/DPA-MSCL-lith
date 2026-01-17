@@ -1,12 +1,16 @@
 # **DPA-MSCL**
-Because the Daqing Oilfield dataset is a private dataset, it was not uploaded, but the experimental code from the Daqing Oilfield dataset is still retained.
-- **Comparison of Confusion Matrices for Different Model Predictions on the Daqing Dataset**
+Because the Daqing Oilfield dataset is part of an ongoing project and has not yet been completed, the full dataset cannot be publicly released. Therefore, only a sample dataset is provided for demonstration and reproducibility purposes, while the experimental code related to the Daqing Oilfield dataset is retained.
+- **Comparison of Confusion Matrices for Different Model Predictions on the Hugoton and Panoma fields**
 - - **Lithologic visualization**
 
 <div align="center">
-  <img src="datasave/img/pre_lith_well1.png" width="610" />
-  <img src="datasave/img/pre_lith_well2.png" width="610" />
+  <img src="datasave/img/profile_W_A.png" width="610" />
+  <img src="datasave/img/profile_W_B.png" width="610" />
 </div>
+
+- - **Comparison of Confusion Matrices**
+
+
 
 ## The operating environment of the project
 -	Python == 3.11.4
