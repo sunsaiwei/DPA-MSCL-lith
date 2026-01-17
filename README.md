@@ -16,8 +16,7 @@ Because the Daqing Oilfield dataset is part of an ongoing project and has not ye
 
 - - **3D t-SNE visualization of the feature space on the Hugoton-Panoma dataset before and after representation learning**
 <div align="center">
-  <img src="datasave/img/Confusion_SGAN.png" width="500" />
-  <img src="datasave/img/Confusion_DPA.png" width="500" />
+  <img src="datasave/img/T-SNE.png" width="800" />
 </div>
 
 
